@@ -22,6 +22,11 @@ export class AuthController {
     // Passport가 리다이렉션 처리합니다.
   }
 
+  @Post('google/login')
+  async googleLogin(@Body() userData) {
+    return this.authService.googleLogin(userData);
+  }
+
   // Google 인증 콜백 엔드포인트
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
