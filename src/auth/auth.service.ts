@@ -48,9 +48,9 @@ export class AuthService {
       email: user.email,
       name: user.name,
       photo: user.photo,
-      age: additionalInfo.age,
-      gender: additionalInfo.gender,
-      interests: additionalInfo.interests,
+      nickname: additionalInfo?.nickname || '사용자',
+      monthlyBudget: additionalInfo?.monthlyBudget || 0,
+      children: additionalInfo?.children || [], // 자녀 정보 배열
     };
 
     // ValkeyDB에 회원 정보 저장
