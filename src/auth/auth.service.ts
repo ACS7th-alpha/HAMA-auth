@@ -1,8 +1,10 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import Redis from 'ioredis';
+import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
 export class AuthService {
+  private readonly jwtService: JwtService;
   private redisClient: Redis;
 
   constructor() {
@@ -26,11 +28,10 @@ export class AuthService {
 
     if (existingUser) {
       // ✅ 기존 회원이면 200 OK + Valkey 데이터 반환
-      return {
-        statusCode: HttpStatus.OK,
-        message: 'Existing user found',
-        user: JSON.parse(existingUser),
-      };
+      const payload = { email: userEmail, sub: req.user.googleId };
+      const token = this.jwtService.sign(payload);
+
+      return { access_token: token, user: JSON.parse(existingUser) };
     } else {
       // ❌ 없는 유저면 401 Unauthorized 반환
       throw new HttpException(
@@ -38,5 +39,30 @@ export class AuthService {
         HttpStatus.UNAUTHORIZED,
       );
     }
+  }
+  async registerUser(user: any, additionalInfo: any) {
+    const newUser = {
+      googleId: user.googleId,
+      email: user.email,
+      name: user.name,
+      photo: user.photo,
+      age: additionalInfo.age,
+      gender: additionalInfo.gender,
+      interests: additionalInfo.interests,
+    };
+
+    // ValkeyDB에 회원 정보 저장
+    await this.redisClient.set(
+      `user:${user.googleId}`,
+      JSON.stringify(newUser),
+      'EX',
+      86400,
+    );
+
+    // JWT 토큰 생성
+    const payload = { email: newUser.email, sub: newUser.googleId };
+    const token = this.jwtService.sign(payload);
+
+    return { access_token: token, user: newUser };
   }
 }

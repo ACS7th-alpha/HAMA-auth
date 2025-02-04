@@ -1,17 +1,24 @@
-// src/auth/auth.module.ts
 import { Module } from '@nestjs/common';
-import { PassportModule } from '@nestjs/passport';
-import { ConfigModule } from '@nestjs/config';
+import { JwtModule } from '@nestjs/jwt';
+import { ConfigModule, ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { AuthController } from './auth.controller';
 import { GoogleStrategy } from './strategies/google.strategy';
 
 @Module({
   imports: [
-    PassportModule.register({ session: true }), // session 사용 시 설정
-    ConfigModule, // ConfigService 사용을 위한 모듈
+    ConfigModule,
+    JwtModule.registerAsync({
+      imports: [ConfigModule],
+      useFactory: (configService: ConfigService) => ({
+        secret: configService.get<string>('JWT_SECRET'),
+        signOptions: { expiresIn: '1d' },
+      }),
+      inject: [ConfigService],
+    }),
   ],
-  providers: [AuthService, GoogleStrategy],
   controllers: [AuthController],
+  providers: [AuthService, GoogleStrategy],
+  exports: [AuthService], // JwtService가 다른 모듈에서 사용될 수도 있으므로 exports 추가
 })
 export class AuthModule {}
