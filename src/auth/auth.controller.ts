@@ -25,13 +25,8 @@ export class AuthController {
   // Google 인증 콜백 엔드포인트
   @Get('google/callback')
   @UseGuards(AuthGuard('google'))
-  async googleAuthRedirect(@Req() req, @Res() res) {
-    const loginResponse = await this.authService.googleLogin(req);
-
-    // ✅ 로그인 성공 시 JWT 토큰과 함께 프론트엔드로 리디렉트
-    return res.redirect(
-      `http://localhost:3000/dashboard?token=${loginResponse.access_token}`,
-    );
+  async googleAuthRedirect(@Req() req) {
+    return await this.authService.googleLogin(req);
   }
 
   @Post('register')

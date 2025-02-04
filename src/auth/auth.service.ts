@@ -27,19 +27,26 @@ export class AuthService {
     const existingUser = await this.redisClient.get(userKey);
 
     if (existingUser) {
-      // ✅ 기존 회원이면 200 OK + Valkey 데이터 반환
-      const payload = { email: userEmail, sub: req.user.googleId };
+      const userData = JSON.parse(existingUser);
+
+      // ✅ JWT 토큰 발급
+      const payload = { email: userEmail, sub: userData.googleId };
       const token = this.jwtService.sign(payload);
 
-      return { access_token: token, user: JSON.parse(existingUser) };
+      return {
+        statusCode: HttpStatus.OK,
+        message: 'Login successful',
+        access_token: token, // 🔹 JWT 포함
+        user: userData,
+      };
     } else {
-      // ❌ 없는 유저면 401 Unauthorized 반환
       throw new HttpException(
         { statusCode: HttpStatus.UNAUTHORIZED, message: 'User not found' },
         HttpStatus.UNAUTHORIZED,
       );
     }
   }
+
   async registerUser(user: any, additionalInfo: any) {
     const newUser = {
       googleId: user.googleId,
