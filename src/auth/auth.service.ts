@@ -205,4 +205,61 @@ export class AuthService {
       );
     }
   }
+
+  async updateUser(userId: any, updateData: any) {
+    try {
+      const formattedUserId = String(userId.userId);
+      const userKey = `user:${formattedUserId}`;
+      const existingUser = await this.redisClient.get(userKey);
+
+      if (!existingUser) {
+        throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+      }
+
+      let user = JSON.parse(existingUser);
+      user = { ...user, ...updateData }; // 기존 데이터 + 변경할 데이터 병합
+
+      await this.redisClient.set(userKey, JSON.stringify(user));
+
+      return {
+        statusCode: HttpStatus.OK,
+        message: 'User updated successfully',
+        user,
+      };
+    } catch (error) {
+      console.error('🚨 Update User Error:', error);
+      throw new HttpException(
+        'User update failed',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
+
+  async deleteUser(userId: any) {
+    try {
+      const formattedUserId = String(userId.userId);
+      const userKey = `user:${formattedUserId}`;
+      const existingUser = await this.redisClient.get(userKey);
+
+      if (!existingUser) {
+        throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+      }
+
+      // ✅ Redis에서 회원 데이터 및 토큰 삭제
+      await this.redisClient.del(userKey);
+      await this.redisClient.del(`access_token:${userId.userId}`);
+      await this.redisClient.del(`refresh_token:${userId.userId}`);
+
+      return {
+        statusCode: HttpStatus.OK,
+        message: 'User deleted successfully',
+      };
+    } catch (error) {
+      console.error('🚨 Delete User Error:', error);
+      throw new HttpException(
+        'User deletion failed',
+        HttpStatus.INTERNAL_SERVER_ERROR,
+      );
+    }
+  }
 }

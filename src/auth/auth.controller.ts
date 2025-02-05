@@ -1,5 +1,13 @@
 // src/auth/auth.controller.ts
-import { Controller, Post, Body, UseGuards, Req } from '@nestjs/common';
+import {
+  Controller,
+  Post,
+  Body,
+  UseGuards,
+  Req,
+  Patch,
+  Delete,
+} from '@nestjs/common';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 
@@ -26,5 +34,17 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async logout(@Req() req) {
     return this.authService.logout(req.user);
+  }
+
+  @Patch('update')
+  @UseGuards(JwtAuthGuard)
+  async updateUser(@Req() req, @Body() updateData) {
+    return this.authService.updateUser(req.user, updateData);
+  }
+
+  @Delete('delete')
+  @UseGuards(JwtAuthGuard)
+  async deleteUser(@Req() req) {
+    return this.authService.deleteUser(req.user);
   }
 }
