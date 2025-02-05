@@ -1,5 +1,6 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import Redis from 'ioredis';
+import { v4 as uuidv4 } from 'uuid';
 import { JwtService } from '@nestjs/jwt';
 
 @Injectable()
@@ -15,7 +16,16 @@ export class AuthService {
   }
 
   async googleLogin(userData: any) {
-    const { googleId, email, name, photo } = userData;
+    if (!userData || !userData.googleId) {
+      throw new HttpException(
+        {
+          statusCode: HttpStatus.BAD_REQUEST,
+          message: 'Google ID is required',
+        },
+        HttpStatus.BAD_REQUEST,
+      );
+    }
+    const googleId = userData.googleId;
     const userKey = `user:${googleId}`;
 
     // ✅ Redis에서 기존 회원 여부 확인
@@ -30,16 +40,31 @@ export class AuthService {
 
     const user = JSON.parse(existingUser);
 
-    // ✅ 새로운 액세스 토큰 (1시간 만료)
-    const payload = { email: user.email, sub: user.googleId };
-    const newAccessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
+    // ✅ 액세스 토큰 (1시간 만료) - 사용자 인증에 사용
+    const accessPayload = { sub: googleId, type: 'access' };
+    const newAccessToken = this.jwtService.sign(accessPayload, {
+      expiresIn: '1h',
+    });
 
-    // ✅ 새로운 리프레시 토큰 (7일 만료)
-    const newRefreshToken = this.jwtService.sign(payload, { expiresIn: '1d' });
+    // ✅ 리프레시 토큰 (7일 만료) - 갱신용, 랜덤 UUID 포함
+    const refreshPayload = { sub: googleId, jti: uuidv4(), type: 'refresh' };
+    const newRefreshToken = this.jwtService.sign(refreshPayload, {
+      expiresIn: '1d',
+    });
 
-    // ✅ Redis에 리프레시 토큰 업데이트
-    user.refreshToken = newRefreshToken;
-    await this.redisClient.set(userKey, JSON.stringify(user), 'EX', 86400);
+    // ✅ 액세스 토큰과 리프레시 토큰 갱신
+    await this.redisClient.set(
+      `access_token:${googleId}`,
+      newAccessToken,
+      'EX',
+      3600,
+    );
+    await this.redisClient.set(
+      `refresh_token:${googleId}`,
+      newRefreshToken,
+      'EX',
+      86400 * 7,
+    );
 
     return {
       statusCode: HttpStatus.OK,
@@ -51,13 +76,32 @@ export class AuthService {
   }
 
   async registerUser(user: any, additionalInfo: any) {
-    // JWT 토큰 생성
-    const payload = { email: user.email, sub: user.googleId };
-    // ✅ 액세스 토큰 (1시간 만료)
-    const accessToken = this.jwtService.sign(payload, { expiresIn: '1h' });
-    // ✅ 리프레시 토큰 (7일 만료)
-    const refreshToken = this.jwtService.sign(payload, { expiresIn: '1d' });
+    const userKey = `user:${user.googleId}`;
 
+    // ✅ Redis에서 기존 사용자 조회
+    const existingUser = await this.redisClient.get(userKey);
+    if (existingUser) {
+      throw new HttpException(
+        { statusCode: HttpStatus.CONFLICT, message: 'User already exists' },
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    // ✅ 액세스 토큰 (1시간 만료) - 사용자 인증에 사용
+    const accessPayload = { sub: user.googleId, type: 'access' };
+    const newAccessToken = this.jwtService.sign(accessPayload, {
+      expiresIn: '1h',
+    });
+
+    // ✅ 리프레시 토큰 (7일 만료) - 갱신용, 랜덤 UUID 포함
+    const refreshPayload = {
+      sub: user.googleId,
+      jti: uuidv4(),
+      type: 'refresh',
+    };
+    const newRefreshToken = this.jwtService.sign(refreshPayload, {
+      expiresIn: '1d',
+    });
     const newUser = {
       googleId: user.googleId,
       email: user.email,
@@ -66,20 +110,31 @@ export class AuthService {
       nickname: additionalInfo?.nickname || '사용자',
       monthlyBudget: additionalInfo?.monthlyBudget || 0,
       children: additionalInfo?.children || [], // 자녀 정보 배열
-      refreshToken,
     };
 
-    // ValkeyDB에 회원 정보 저장
+    // ✅ 회원 정보는 영구 저장
     await this.redisClient.set(
       `user:${user.googleId}`,
       JSON.stringify(newUser),
+    );
+    await this.redisClient.persist(`user:${user.googleId}`);
+
+    // ✅ 액세스 토큰과 리프레시 토큰을 별도 저장 (자동 만료 설정)
+    await this.redisClient.set(
+      `access_token:${user.googleId}`,
+      newAccessToken,
+      'EX',
+      3600,
+    );
+    await this.redisClient.set(
+      `refresh_token:${user.googleId}`,
+      newRefreshToken,
       'EX',
       86400,
     );
-
     return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
+      access_token: newAccessToken,
+      refresh_token: newRefreshToken,
       user: newUser,
     };
   }
@@ -88,6 +143,7 @@ export class AuthService {
     try {
       // ✅ 리프레시 토큰 검증
       const decoded = this.jwtService.verify(refreshToken);
+      const googleId = decoded.sub;
 
       // ✅ Redis에서 사용자 정보 가져오기
       const userKey = `user:${decoded.sub}`;
@@ -96,23 +152,38 @@ export class AuthService {
         throw new HttpException('User not found', HttpStatus.UNAUTHORIZED);
       }
 
-      const user = JSON.parse(existingUser);
-
-      // ✅ 새 액세스 토큰 발급 (1시간 만료)
-      const newAccessToken = this.jwtService.sign(
-        { email: user.email, sub: user.googleId },
-        { expiresIn: '1h' },
+      // ✅ Redis에서 저장된 리프레시 토큰 가져오기
+      const storedRefreshToken = await this.redisClient.get(
+        `refresh_token:${googleId}`,
       );
+      console.log(`Stored Refresh Token in Redis: ${storedRefreshToken}`); // ✅ Redis에 저장된 토큰 확인
 
+      if (!storedRefreshToken || storedRefreshToken !== refreshToken) {
+        throw new HttpException(
+          'Invalid refresh token',
+          HttpStatus.UNAUTHORIZED,
+        );
+      }
+      const accessPayload = { sub: googleId, type: 'access' };
+      const newAccessToken = this.jwtService.sign(accessPayload, {
+        expiresIn: '1h',
+      });
+      await this.redisClient.set(
+        `access_token:${googleId}`,
+        newAccessToken,
+        'EX',
+        3600,
+      );
       return { access_token: newAccessToken };
     } catch (error) {
       throw new HttpException('Invalid refresh token', HttpStatus.UNAUTHORIZED);
     }
   }
 
-  async logout(userId: string) {
+  async logout(userId: any) {
     try {
-      const userKey = `user:${userId}`;
+      const formattedUserId = String(userId.userId); // ✅ 강제 변환
+      const userKey = `user:${formattedUserId}`;
 
       // ✅ Redis에서 사용자 데이터 조회
       const existingUser = await this.redisClient.get(userKey);
@@ -122,10 +193,9 @@ export class AuthService {
 
       const user = JSON.parse(existingUser);
 
-      // ✅ Redis에서 리프레시 토큰 삭제 (로그아웃 처리)
-      delete user.refreshToken;
-      delete user.accessToken;
-      await this.redisClient.set(userKey, JSON.stringify(user), 'EX', 86400);
+      // ✅ 액세스 토큰과 리프레시 토큰 삭제
+      await this.redisClient.del(`access_token:${userId.userId}`);
+      await this.redisClient.del(`refresh_token:${userId.userId}`);
 
       return { statusCode: HttpStatus.OK, message: 'Logout successful' };
     } catch (error) {
