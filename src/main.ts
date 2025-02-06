@@ -9,10 +9,7 @@ async function bootstrap() {
   const configService = app.get(ConfigService);
 
   // ✅ CORS 활성화 (필요한 경우)
-  app.enableCors({
-    origin: 'http://localhost:3000', // ✅ React/Vue 프론트엔드 주소
-    credentials: true, // 세션 사용을 위해 credentials 활성화
-  });
+  app.enableCors({});
 
   // ✅ 세션 및 Passport 설정 (OAuth 로그인 및 인증용)
   app.use(sessionConfig(configService));
