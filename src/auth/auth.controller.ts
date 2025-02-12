@@ -7,7 +7,10 @@ import {
   Req,
   Patch,
   Delete,
+  Put,
+  Param,
 } from '@nestjs/common';
+import { UpdateChildDto } from './dto/update-child.dto';
 import { JwtAuthGuard } from '../guards/jwt-auth.guard';
 import { AuthService } from './auth.service';
 
@@ -46,5 +49,31 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async deleteUser(@Req() req) {
     return this.authService.deleteUser(req.user);
+  }
+
+  @Post('children')
+  @UseGuards(JwtAuthGuard)
+  async addChild(@Body() childData: UpdateChildDto, @Req() req) {
+    const googleId = req.user.userId;
+    console.log(googleId);
+    return this.authService.addChild(googleId, childData);
+  }
+
+  @Put('children/:childName')
+  @UseGuards(JwtAuthGuard)
+  async updateChild(
+    @Param('childName') childName: string,
+    @Body() updateData: UpdateChildDto,
+    @Req() req,
+  ) {
+    const googleId = req.user.userId;
+    return this.authService.updateChild(googleId, childName, updateData);
+  }
+
+  @Delete('children/:childName')
+  @UseGuards(JwtAuthGuard)
+  async deleteChild(@Param('childName') childName: string, @Req() req) {
+    const googleId = req.user.userId;
+    return this.authService.deleteChild(googleId, childName);
   }
 }

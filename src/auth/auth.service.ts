@@ -2,6 +2,7 @@ import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
 import Redis from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import { JwtService } from '@nestjs/jwt';
+import { UpdateChildDto } from './dto/update-child.dto';
 
 @Injectable()
 export class AuthService {
@@ -261,5 +262,98 @@ export class AuthService {
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
+  }
+
+  async addChild(googleId: string, childData: UpdateChildDto) {
+    const userKey = `user:${googleId}`;
+    const existingUser = await this.redisClient.get(userKey);
+
+    if (!existingUser) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    let user = JSON.parse(existingUser);
+
+    // ✅ 중복 추가 방지 (이름 기준)
+    const isChildExists = user.children.some(
+      (child) => child.name === childData.name,
+    );
+    if (isChildExists) {
+      throw new HttpException(
+        'Child with this name already exists',
+        HttpStatus.CONFLICT,
+      );
+    }
+
+    // ✅ 기존 user.children 배열에 아기 정보 추가
+    user.children.push(childData);
+
+    // ✅ 업데이트된 사용자 정보를 Redis에 저장
+    await this.redisClient.set(userKey, JSON.stringify(user));
+
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Child added successfully',
+      user, // 업데이트된 전체 사용자 정보 반환
+    };
+  }
+
+  async updateChild(
+    googleId: string,
+    childName: string,
+    updateData: UpdateChildDto,
+  ) {
+    const userKey = `user:${googleId}`;
+    const existingUser = await this.redisClient.get(userKey);
+
+    if (!existingUser) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    let user = JSON.parse(existingUser);
+
+    const childIndex = user.children.findIndex(
+      (child) => child.name === childName,
+    );
+    if (childIndex === -1) {
+      throw new HttpException('Child not found', HttpStatus.NOT_FOUND);
+    }
+
+    // ✅ 기존 데이터를 업데이트
+    user.children[childIndex] = { ...user.children[childIndex], ...updateData };
+
+    await this.redisClient.set(userKey, JSON.stringify(user));
+
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Child updated successfully',
+      children: user.children,
+    };
+  }
+
+  async deleteChild(googleId: string, childName: string) {
+    const userKey = `user:${googleId}`;
+    const existingUser = await this.redisClient.get(userKey);
+
+    if (!existingUser) {
+      throw new HttpException('User not found', HttpStatus.NOT_FOUND);
+    }
+
+    let user = JSON.parse(existingUser);
+
+    const initialLength = user.children.length;
+    user.children = user.children.filter((child) => child.name !== childName);
+
+    if (user.children.length === initialLength) {
+      throw new HttpException('Child not found', HttpStatus.NOT_FOUND);
+    }
+
+    await this.redisClient.set(userKey, JSON.stringify(user));
+
+    return {
+      statusCode: HttpStatus.OK,
+      message: 'Child deleted successfully',
+      children: user.children,
+    };
   }
 }
