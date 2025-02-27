@@ -1,0 +1,61 @@
+name: Build
+
+on:
+  push:
+    branches:
+      - master
+
+jobs:
+  build:
+    name: Build and analyze
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: Wait for SonarQube Analysis
+        run: sleep 30  
+
+      - name: Fetch SonarQube Quality Gate Status
+        run: |
+          echo "Fetching SonarQube Quality Gate Status..."
+          curl -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=ACS7th-alpha-HAMA-auth"
+
+      - name: Check SonarQube Report File
+        run: |
+          echo "Checking report-task.txt content..."
+          cat .scannerwork/report-task.txt || echo "Report file not found!"
+
+      - name: SonarQube Quality Gate Check
+        id: sonarqube_quality_gate
+        uses: SonarSource/sonarqube-quality-gate-action@v1
+        timeout-minutes: 10
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Debug Quality Gate Status
+        run: |
+          echo "Quality Gate Status: ${{ steps.sonarqube_quality_gate.outputs.quality_gate_status }}"
+
+    outputs:
+      quality_gate_status: ${{ steps.sonarqube_quality_gate.outputs.quality_gate_status || 'PASSED' }}
+
+  check-quality-gate:
+    name: Check Quality Gate
+    runs-on: ubuntu-latest
+    needs: build
+    if: ${{ needs.build.outputs.quality_gate_status && needs.build.outputs.quality_gate_status != 'PASSED' }}
+    steps:
+      - name: Fail if Quality Gate fails
+        run: |
+          echo "Quality Gate check failed. Stopping pipeline."
+          exit 1
