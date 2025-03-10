@@ -1,19 +1,29 @@
 import { Injectable, HttpException, HttpStatus } from '@nestjs/common';
-import Redis from 'ioredis';
+import Redis, { Cluster } from 'ioredis';
 import { v4 as uuidv4 } from 'uuid';
 import { JwtService } from '@nestjs/jwt';
 import { UpdateChildDto } from './dto/update-child.dto';
 
 @Injectable()
 export class AuthService {
-  private redisClient: Redis;
+  private redisClient: Cluster;
 
   constructor(private readonly jwtService: JwtService) {
-    this.redisClient = new Redis({
-      host: process.env.REDIS_HOST || '127.0.0.1',
-      port: Number(process.env.REDIS_PORT) || 6379,
-      password: process.env.REDIS_PASSWORD || '', // ✅ Redis 인증 추가
-    });
+    this.redisClient = new Redis.Cluster(
+      [
+        {
+          host: process.env.MEMORYDB_HOST || 'your-memorydb-cluster-endpoint',
+          port: Number(process.env.MEMORYDB_PORT) || 6379,
+        },
+      ],
+      {
+        dnsLookup: (address, callback) => callback(null, address), // AWS에서는 DNS를 기반으로 클러스터 노드 검색
+        redisOptions: {
+          tls: process.env.MEMORYDB_USE_TLS ? {} : undefined, // MemoryDB는 기본적으로 TLS 사용 가능
+          password: process.env.MEMORYDB_PASSWORD || '',
+        },
+      },
+    );
   }
 
   async googleLogin(userData: any) {
@@ -26,10 +36,11 @@ export class AuthService {
         HttpStatus.BAD_REQUEST,
       );
     }
+
     const googleId = userData.googleId;
     const userKey = `user:${googleId}`;
 
-    // ✅ Redis에서 기존 회원 여부 확인
+    // ✅ MemoryDB에서 기존 회원 확인
     const existingUser = await this.redisClient.get(userKey);
 
     if (!existingUser) {
@@ -41,19 +52,18 @@ export class AuthService {
 
     const user = JSON.parse(existingUser);
 
-    // ✅ 액세스 토큰 (1시간 만료) - 사용자 인증에 사용
+    // ✅ 액세스 및 리프레시 토큰 생성
     const accessPayload = { sub: googleId, type: 'access' };
     const newAccessToken = this.jwtService.sign(accessPayload, {
       expiresIn: '1h',
     });
 
-    // ✅ 리프레시 토큰 (7일 만료) - 갱신용, 랜덤 UUID 포함
     const refreshPayload = { sub: googleId, jti: uuidv4(), type: 'refresh' };
     const newRefreshToken = this.jwtService.sign(refreshPayload, {
       expiresIn: '1d',
     });
 
-    // ✅ 액세스 토큰과 리프레시 토큰 갱신
+    // ✅ MemoryDB에 저장 (토큰 갱신)
     await this.redisClient.set(
       `access_token:${googleId}`,
       newAccessToken,
@@ -70,8 +80,8 @@ export class AuthService {
     return {
       statusCode: HttpStatus.OK,
       message: 'Login successful',
-      access_token: newAccessToken, // ✅ JWT 반환
-      refresh_token: newRefreshToken, // ✅ 리프레시 토큰 반환
+      access_token: newAccessToken,
+      refresh_token: newRefreshToken,
       user,
     };
   }
