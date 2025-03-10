@@ -1,11 +1,7 @@
 import session from 'express-session';
+import { RedisStore } from 'connect-redis';
 import Redis from 'ioredis';
-import connectRedis from 'connect-redis';
 import { ConfigService } from '@nestjs/config';
-
-// 기존 방식과 동일하게 session을 전달하여 스토어 팩토리를 생성하려 했던 방식은
-// 최신 버전에서 동작하지 않을 수 있으므로, 타입 단언을 사용합니다.
-const RedisStore = (connectRedis as any)(session);
 
 export const sessionConfig = (configService: ConfigService) => {
   const memorydbHost = configService.get<string>('MEMORYDB_HOST');
@@ -29,10 +25,10 @@ export const sessionConfig = (configService: ConfigService) => {
     },
   );
 
-  // 타입 단언을 통해 constructable한 것으로 처리
-  const redisStore = new (RedisStore as { new (options: any): session.Store })({
+  // 직접 RedisStore 인스턴스를 생성
+  const redisStore = new RedisStore({
     client: cluster,
-    prefix: 'myapp:',
+    prefix: 'myapp:', // Redis 키 접두사 (옵션)
   });
 
   return session({
