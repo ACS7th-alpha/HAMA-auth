@@ -1,0 +1,47 @@
+name: CI-Harbor
+
+on:
+  workflow_run:
+    workflows: ["Build"]
+    types:
+      - completed
+
+jobs:
+  build-and-push:
+    runs-on: self-hosted
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Fetch SonarQube Quality Gate Status
+        id: check_sonar
+        run: |
+          echo "Fetching SonarQube Quality Gate Status..."
+          STATUS=$(curl -s -u ${{ secrets.SONAR_TOKEN }}: \
+            "${{ secrets.SONAR_HOST_URL }}/api/qualitygates/project_status?projectKey=ACS7th-alpha-HAMA-auth" \
+            | jq -r '.projectStatus.status')
+
+          echo "Quality Gate Status: $STATUS"
+          echo "quality_gate_status=$STATUS" >> $GITHUB_ENV
+
+      - name: Stop if Quality Gate failed
+        if: env.quality_gate_status != 'OK'
+        run: |
+          echo "Quality Gate check failed. Stopping pipeline."
+          exit 1
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '22'
+
+      - name: Login to Harbor (Secure)
+        run: |
+          echo "${{ secrets.HARBOR_PASSWORD }}" | docker login https://192.168.2.76:443 -u ${{ secrets.HARBOR_USERNAME }} --password-stdin
+
+      - name: Build and push Docker images
+        run: |
+          BUILD_NUMBER=${{ github.run_number }} # GitHub Actions 빌드 번호
+          docker build -t 192.168.2.76:443/hama/hama-auth:$BUILD_NUMBER .
+          docker push 192.168.2.76:443/hama/hama-auth:$BUILD_NUMBER
