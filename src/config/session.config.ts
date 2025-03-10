@@ -1,33 +1,49 @@
 import session from 'express-session';
-import { createClient } from 'redis';
-import { RedisStore } from 'connect-redis';
+import Redis from 'ioredis';
+import connectRedis from 'connect-redis';
 import { ConfigService } from '@nestjs/config';
 
+// 기존 방식과 동일하게 session을 전달하여 스토어 팩토리를 생성하려 했던 방식은
+// 최신 버전에서 동작하지 않을 수 있으므로, 타입 단언을 사용합니다.
+const RedisStore = (connectRedis as any)(session);
+
 export const sessionConfig = (configService: ConfigService) => {
-  // Redis 클라이언트 생성
-  const redisClient = createClient({
-    url: `redis://${configService.get<string>('REDIS_HOST')}:${configService.get<number>('REDIS_PORT')}`,
+  const memorydbHost = configService.get<string>('MEMORYDB_HOST');
+  const memorydbPort = configService.get<number>('MEMORYDB_PORT');
+  const memorydbUseTLS = configService.get<boolean>('MEMORYDB_USE_TLS');
+  const memorydbPassword = configService.get<string>('MEMORYDB_PASSWORD') || '';
+
+  const cluster = new Redis.Cluster(
+    [
+      {
+        host: memorydbHost,
+        port: memorydbPort,
+      },
+    ],
+    {
+      dnsLookup: (address, callback) => callback(null, address),
+      redisOptions: {
+        tls: memorydbUseTLS ? {} : undefined,
+        password: memorydbPassword,
+      },
+    },
+  );
+
+  // 타입 단언을 통해 constructable한 것으로 처리
+  const redisStore = new (RedisStore as { new (options: any): session.Store })({
+    client: cluster,
+    prefix: 'myapp:',
   });
 
-  // Redis 연결
-  redisClient.connect().catch(console.error);
-
-  // RedisStore 초기화
-  const redisStore = new RedisStore({
-    client: redisClient,
-    prefix: 'myapp:', // Redis 키에 접두사 추가 (옵션)
-  });
-
-  // 세션 설정 반환
   return session({
     store: redisStore,
-    secret: configService.get<string>('SESSION_SECRET'), // 세션 암호화 키
-    resave: false, // 세션을 강제로 다시 저장하지 않음
-    saveUninitialized: false, // 초기화되지 않은 세션을 저장하지 않음
+    secret: configService.get<string>('SESSION_SECRET'),
+    resave: false,
+    saveUninitialized: false,
     cookie: {
-      secure: false, // HTTPS에서만 쿠키를 전송 (개발 환경에서는 false)
-      httpOnly: true, // 클라이언트 JavaScript에서 쿠키 접근 방지
-      maxAge: 60000, // 쿠키 만료 시간 (1분)
+      secure: false,
+      httpOnly: true,
+      maxAge: 60000,
     },
   });
 };
